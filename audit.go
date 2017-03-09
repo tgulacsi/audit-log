@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"log/syslog"
 	"net"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,6 +43,8 @@ func Main() error {
 	flagLog := flag.String("log", fmt.Sprintf("audit-%s.log", time.Now().Format("20060102_150405")), "log file")
 	flagStampingPeriod := flag.Duration("stamping-period", 60*time.Second, "stamping (and flushing) period")
 	flagVerbose := flag.Bool("v", false, "verbose logging")
+	flagSyslog := flag.String("syslog", "", "syslog to forward logs to. Format: [tcp:|udp:]host[:port], or 'local' to use the system logger.")
+	flagSyslogTag := flag.String("syslog-tag", "audit-log", "syslog tag to use")
 	flag.Parse()
 
 	var privateKey ed25519.PrivateKey
@@ -104,6 +108,37 @@ func Main() error {
 	h := handler{
 		PrivateKey:           privateKey,
 		authenticatingWriter: aw,
+		Forward:              func([]byte) error { return nil },
+	}
+	if *flagSyslog != "" {
+		var lw *syslog.Writer
+		prio, tag := syslog.LOG_NOTICE|syslog.LOG_LOCAL1, *flagSyslogTag
+		if *flagSyslog == "local" {
+			lw, err = syslog.New(prio, tag)
+		} else {
+			network, addr := "udp", *flagSyslog
+			if strings.HasPrefix(addr, "tcp:") {
+				network, addr = "tcp", addr[4:]
+			} else if strings.HasPrefix(addr, "udp:") {
+				network, addr = "udp", addr[4:]
+			}
+			if i := strings.LastIndexByte(addr, ':'); i < 0 {
+				if network == "tcp" {
+					addr += ":6514"
+				} else {
+					addr += ":514"
+				}
+			}
+			*flagSyslog = network + ":" + addr
+			lw, err = syslog.Dial(network, addr, prio, tag)
+		}
+		if err != nil {
+			return errors.Wrap(err, *flagSyslog)
+		}
+		h.Forward = func(line []byte) error {
+			_, err := lw.Write(line)
+			return err
+		}
 	}
 
 	for {
@@ -121,6 +156,7 @@ func Main() error {
 type handler struct {
 	ed25519.PrivateKey
 	*authenticatingWriter
+	Forward func([]byte) error
 }
 
 var bufPool = sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 1024)) }}
@@ -139,7 +175,7 @@ func (h handler) handleConnection(conn net.Conn) error {
 		qry, err := url.ParseQuery(scanner.Text())
 		if err != nil {
 			log.Println(err)
-			fmt.Fprintf(conn, "ERROR %s\n", url.QueryEscape(err.Error()))
+			fmt.Fprintf(conn, "-ERROR %s\n", url.QueryEscape(err.Error()))
 			continue
 		}
 		msg.Time = time.Now()
@@ -149,6 +185,12 @@ func (h handler) handleConnection(conn net.Conn) error {
 			log.Println(err)
 			fmt.Fprintf(conn, "-ERROR %v\n", err)
 			return err
+		}
+
+		if err := h.Forward(line); err != nil {
+			log.Println(err)
+			fmt.Fprintf(conn, "-ERROR %v\n", err)
+			continue
 		}
 		conn.Write([]byte("+OK\n"))
 	}
