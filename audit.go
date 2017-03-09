@@ -28,6 +28,13 @@ func main() {
 	}
 }
 
+const Preamble = `All data is framed by prefixing with the length in ASCII decimal, 5 digits (prefixed with zeros), then ':'.
+
+Data is hashed with SHA-512, and these hashes are signed with Ed25519.
+
+Real data starts right after this preamble.
+`
+
 func Main() error {
 	flagAddr := flag.String("addr", "127.0.0.1:8901", "address to listen on")
 	flagPrivKey := flag.String("key", "audit.key", "private key to use for signing")
@@ -140,10 +147,10 @@ func (h handler) handleConnection(conn net.Conn) error {
 		msg.Values = qry
 		if err = h.authenticatingWriter.WriteMessage(msg); err != nil {
 			log.Println(err)
-			fmt.Fprintf(conn, "ERROR %v\n", err)
+			fmt.Fprintf(conn, "-ERROR %v\n", err)
 			return err
 		}
-		conn.Write([]byte("OK\n"))
+		conn.Write([]byte("+OK\n"))
 	}
 	return nil
 }

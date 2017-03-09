@@ -138,13 +138,6 @@ func (ar *authenticatedReader) Parse(msg *Message, p []byte) (found bool, err er
 	return false, nil
 }
 
-const Preamble = `All data is framed by prefixing with the length in ASCII decimal, 5 digits (prefixed with zeros), then ':'.
-
-Data is hashed with SHA-512, and these hashes are signed with Ed25519.
-
-Real data starts right after this preamble.
-`
-
 type framedReader struct {
 	br   *bufio.Reader
 	Hash hash.Hash
