@@ -1,4 +1,17 @@
-// Copyright 2017 Tamás Gulácsi. All rights reserved.
+// Copyright 2017 Tamás Gulácsi
+//
+//
+//    Licensed under the Apache License, Version 2.0 (the "License");
+//    you may not use this file except in compliance with the License.
+//    You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//    Unless required by applicable law or agreed to in writing, software
+//    distributed under the License is distributed on an "AS IS" BASIS,
+//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//    See the License for the specific language governing permissions and
+//    limitations under the License.
 
 package main
 
@@ -8,6 +21,7 @@ import (
 	"crypto/rand"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"log/syslog"
@@ -21,6 +35,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -29,13 +44,6 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
-const Preamble = `All data is framed by prefixing with the length in ASCII decimal, 5 digits (prefixed with zeros), then ':'.
-
-Data is hashed with SHA-512, and these hashes are signed with Ed25519.
-
-Real data starts right after this preamble.
-`
 
 func Main() error {
 	flagAddr := flag.String("addr", "127.0.0.1:8901", "address to listen on")
@@ -75,7 +83,7 @@ func Main() error {
 			return errors.Wrap(err, flag.Arg(1))
 		}
 		defer fh.Close()
-		return Dump(os.Stdout, fh, privateKey.Public().(ed25519.PublicKey), Log)
+		return auditlog.Dump(os.Stdout, fh, privateKey.Public().(ed25519.PublicKey), Log)
 	}
 
 	ln, err := net.Listen("tcp", *flagAddr)
@@ -90,7 +98,7 @@ func Main() error {
 	}
 	defer fh.Close()
 
-	aw, err := newAuthenticatingWriter(fh, privateKey, *flagStampingPeriod, Log)
+	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, *flagStampingPeriod, Log)
 	if err != nil {
 		return err
 	}
@@ -106,9 +114,9 @@ func Main() error {
 	}()
 
 	h := handler{
-		PrivateKey:           privateKey,
-		authenticatingWriter: aw,
-		Forward:              func([]byte) error { return nil },
+		PrivateKey:    privateKey,
+		messageWriter: aw,
+		Forward:       func([]byte) error { return nil },
 	}
 	if *flagSyslog != "" {
 		var lw *syslog.Writer
@@ -153,9 +161,14 @@ func Main() error {
 	return fh.Close()
 }
 
+type messageWriter interface {
+	WriteMessage(auditlog.Message) error
+	io.Closer
+}
+
 type handler struct {
 	ed25519.PrivateKey
-	*authenticatingWriter
+	messageWriter
 	Forward func([]byte) error
 }
 
@@ -164,7 +177,7 @@ var bufPool = sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]
 func (h handler) handleConnection(conn net.Conn) error {
 	defer conn.Close()
 
-	var msg Message
+	var msg auditlog.Message
 	source := conn.RemoteAddr().String()
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
@@ -181,7 +194,7 @@ func (h handler) handleConnection(conn net.Conn) error {
 		msg.Time = time.Now()
 		msg.Source = source
 		msg.Values = qry
-		if err = h.authenticatingWriter.WriteMessage(msg); err != nil {
+		if err = h.messageWriter.WriteMessage(msg); err != nil {
 			log.Println(err)
 			fmt.Fprintf(conn, "-ERROR %v\n", err)
 			return err
