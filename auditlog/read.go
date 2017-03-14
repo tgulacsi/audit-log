@@ -18,6 +18,7 @@ package auditlog
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
@@ -47,10 +48,20 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 	if Log == nil {
 		Log = func(...interface{}) error { return nil }
 	}
+
+	// try to decompress
+	var buf bytes.Buffer
+	gr, err := gzip.NewReader(io.TeeReader(r, &buf))
+	if err != nil {
+		r = io.MultiReader(bytes.NewReader(buf.Bytes()), r)
+	} else {
+		r = gr
+		defer gr.Close()
+	}
+
 	fr := &framedReader{br: bufio.NewReader(r), Hash: newHash(), Log: Log}
 	if !fr.Next() {
-		err := fr.Err()
-		if err == nil {
+		if err = fr.Err(); err == nil {
 			err = io.EOF
 		}
 		return err
@@ -89,8 +100,7 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 
 		fmt.Fprintf(w, "%s [%s]: %s\n", msg.Time.Format(time.RFC3339), msg.Source, msg.Values)
 	}
-	err := fr.Err()
-	if err == io.EOF {
+	if err = fr.Err(); err == io.EOF {
 		err = nil
 	}
 	return err

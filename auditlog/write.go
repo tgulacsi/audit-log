@@ -17,11 +17,14 @@ package auditlog
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"hash"
 	"io"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +105,19 @@ func (aw *authenticatingWriter) Close() error {
 	case <-time.After(1 * time.Second):
 	}
 	return nil
+}
+
+func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, Log func(...interface{}) error) (*authenticatingWriter, error) {
+	fh, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
+	if err != nil {
+		return nil, errors.Wrap(err, fn)
+	}
+	w := writeSyncer(fh)
+	if strings.HasSuffix(fn, ".gz") {
+		w = gzipWriteSyncer{fh: fh, gw: gzip.NewWriter(fh)}
+	}
+
+	return NewAuthenticatingWriter(w, privateKey, stampingPeriod, Log)
 }
 
 func NewAuthenticatingWriter(w writeSyncer, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, Log func(...interface{}) error) (*authenticatingWriter, error) {
@@ -235,6 +251,35 @@ type WrappedStamp struct {
 type Stamp struct {
 	Hash      []byte `json:"hash"`
 	Signature []byte `json:"signature"`
+}
+
+var _ = writeSyncer(gzipWriteSyncer{})
+
+type gzipWriteSyncer struct {
+	fh writeSyncCloser
+	gw *gzip.Writer
+}
+
+type writeSyncCloser interface {
+	writeSyncer
+	io.Closer
+}
+
+func (gws gzipWriteSyncer) Write(p []byte) (int, error) {
+	return gws.gw.Write(p)
+}
+func (gws gzipWriteSyncer) Close() error {
+	err := gws.gw.Close()
+	if closeErr := gws.fh.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	return err
+}
+func (gws gzipWriteSyncer) Sync() error {
+	if err := gws.gw.Flush(); err != nil {
+		return err
+	}
+	return gws.fh.Sync()
 }
 
 // vim: set fileencoding=utf-8 noet:

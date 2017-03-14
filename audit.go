@@ -48,7 +48,7 @@ func main() {
 func Main() error {
 	flagAddr := flag.String("addr", "127.0.0.1:8901", "address to listen on")
 	flagPrivKey := flag.String("key", "audit.key", "private key to use for signing")
-	flagLog := flag.String("log", fmt.Sprintf("audit-%s.log", time.Now().Format("20060102_150405")), "log file")
+	flagLog := flag.String("log", fmt.Sprintf("audit-%s.log.gz", time.Now().Format("20060102_150405")), "log file")
 	flagStampingPeriod := flag.Duration("stamping-period", 60*time.Second, "stamping (and flushing) period")
 	flagVerbose := flag.Bool("v", false, "verbose logging")
 	flagSyslog := flag.String("syslog", "", "syslog to forward logs to. Format: [tcp:|udp:]host[:port], or 'local' to use the system logger.")
@@ -92,13 +92,7 @@ func Main() error {
 		return errors.Wrap(err, *flagAddr)
 	}
 
-	fh, err := os.OpenFile(*flagLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
-	if err != nil {
-		return errors.Wrap(err, *flagLog)
-	}
-	defer fh.Close()
-
-	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, *flagStampingPeriod, Log)
+	aw, err := auditlog.NewAuthenticatingFileWriter(*flagLog, privateKey, *flagStampingPeriod, Log)
 	if err != nil {
 		return err
 	}
@@ -158,7 +152,7 @@ func Main() error {
 		go h.handleConnection(conn)
 	}
 
-	return fh.Close()
+	return aw.Close()
 }
 
 type messageWriter interface {
