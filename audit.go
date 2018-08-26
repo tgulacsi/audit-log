@@ -17,7 +17,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/rand"
 	"flag"
 	"fmt"
@@ -30,7 +29,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -165,8 +163,6 @@ type handler struct {
 	messageWriter
 	Forward func([]byte) error
 }
-
-var bufPool = sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 1024)) }}
 
 func (h handler) handleConnection(conn net.Conn) error {
 	defer conn.Close()
