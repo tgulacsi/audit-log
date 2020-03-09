@@ -1,6 +1,8 @@
 module github.com/tgulacsi/audit-log
 
+go 1.14
+
 require (
-	github.com/pkg/errors v0.8.0
-	golang.org/x/crypto v0.0.0-20180820150726-614d502a4dac
+	github.com/pkg/errors v0.9.1
+	golang.org/x/crypto v0.0.0-20200302210943-78000ba7a073
 )
