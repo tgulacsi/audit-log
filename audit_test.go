@@ -1,4 +1,4 @@
-// Copyright 2017 Tamás Gulácsi
+// Copyright 2017, 2021 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +13,7 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 
-package main
+package main_test
 
 import (
 	"crypto/rand"
@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -42,7 +43,7 @@ func TestAudit(t *testing.T) {
 		t.Log(keyvals...)
 		return nil
 	}
-	aw, err := newAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, Log)
+	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, Log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +57,7 @@ func TestAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fh.Close()
-	if err := Dump(os.Stdout, fh, publicKey, Log); err != nil {
+	if err := auditlog.Dump(os.Stdout, fh, publicKey, Log); err != nil {
 		t.Fatal(err)
 	}
 }

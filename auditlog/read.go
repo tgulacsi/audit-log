@@ -22,6 +22,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -29,8 +30,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ed25519"
-
-	"github.com/pkg/errors"
 )
 
 var newHash = sha512.New
@@ -67,11 +66,11 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 		return err
 	}
 	if !fr.Next() || !bytes.HasPrefix(fr.Bytes(), []byte(`{"publicKey":`)) {
-		return errors.Wrap(ErrPubKeyMissing, string(fr.Bytes()))
+		return fmt.Errorf("%q: %w", string(fr.Bytes()), ErrPubKeyMissing)
 	}
 	var pub PubKey
 	if err := json.Unmarshal(fr.Bytes(), &pub); err != nil {
-		return errors.Wrap(err, string(fr.Bytes()))
+		return fmt.Errorf("%q: %w", string(fr.Bytes()), err)
 	}
 	if !bytes.Equal(publicKey, pub.PublicKey) {
 		return ErrPubKeyMismatch
@@ -100,7 +99,7 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 
 		fmt.Fprintf(w, "%s [%s]: %s\n", msg.Time.Format(time.RFC3339), msg.Source, msg.Values)
 	}
-	if err = fr.Err(); err == io.EOF {
+	if err = fr.Err(); errors.Is(err, io.EOF) {
 		err = nil
 	}
 	return err
@@ -118,13 +117,13 @@ type authenticatedReader struct {
 // Verify the data hash and signature, and return whether this should be processed (realm message).
 func (ar *authenticatedReader) Parse(msg *Message, p []byte) (found bool, err error) {
 	if len(p) < 3 {
-		return false, errors.Wrap(ErrTooShort, string(p))
+		return false, fmt.Errorf("%q: %w", string(p), ErrTooShort)
 	}
 	switch string(p[:3]) {
 	case `{"m`:
 		var wm WrappedMessage
 		if err := json.Unmarshal(p, &wm); err != nil {
-			return false, errors.Wrap(err, string(p))
+			return false, fmt.Errorf("%q: %w", string(p), err)
 		}
 		*msg = wm.Message
 		return true, nil
@@ -132,11 +131,11 @@ func (ar *authenticatedReader) Parse(msg *Message, p []byte) (found bool, err er
 	case `{"t`:
 		var ts TimeStamp
 		if err := json.Unmarshal(p, &ts); err != nil {
-			return false, errors.Wrap(err, string(p))
+			return false, fmt.Errorf("%q: %w", string(p), err)
 		}
 		if !ar.lastStampTime.IsZero() {
 			if dur := ts.Time.Sub(ar.lastStampTime); !(dur < ar.StampingPeriod*3/2) {
-				return false, errors.Wrapf(ErrMissingTime, "last=%s actual=%s (dur=%s, required=%s)", ar.lastStampTime, ts.Time, dur, ar.StampingPeriod)
+				return false, fmt.Errorf("last=%s actual=%s (dur=%s, required=%s): %w", ar.lastStampTime, ts.Time, dur, ar.StampingPeriod, ErrMissingTime)
 			}
 		}
 		ar.lastStampTime = ts.Time
@@ -144,19 +143,20 @@ func (ar *authenticatedReader) Parse(msg *Message, p []byte) (found bool, err er
 	case `{"s`:
 		var ws WrappedStamp
 		if err := json.Unmarshal(p, &ws); err != nil {
-			return false, errors.Wrap(err, string(p))
+			return false, fmt.Errorf("%q: %w", string(p), err)
 		}
 		ar.scratch = ar.framedReader.prevHash
 		ar.framedReader.Hash = ar.framedReader.NextHash
 		if !bytes.Equal(ws.Stamp.Hash, ar.scratch) {
-			return false, errors.Wrapf(ErrHashMismatch, "got=%s wanted=%s",
+			return false, fmt.Errorf("got=%s wanted=%s: %w",
 				base64.URLEncoding.EncodeToString(ar.scratch),
-				base64.URLEncoding.EncodeToString(ws.Stamp.Hash))
+				base64.URLEncoding.EncodeToString(ws.Stamp.Hash),
+				ErrHashMismatch)
 		}
 		return false, ar.Verify(ws.Stamp.Hash, ws.Stamp.Signature)
 
 	default:
-		return false, errors.Errorf("unknown message %q", p)
+		return false, fmt.Errorf("unknown message %q", p)
 	}
 	return false, nil
 }
@@ -192,12 +192,12 @@ func (fr *framedReader) Next() bool {
 	}
 	if fr.scratch[5] == ':' {
 		if length, fr.err = strconv.ParseUint(string(fr.scratch[:5]), 10, 64); fr.err != nil {
-			fr.err = errors.Wrap(fr.err, string(fr.scratch))
+			fr.err = fmt.Errorf("%q: %w", string(fr.scratch), fr.err)
 			return false
 		}
 	}
 	if length == 0 || length > 99999 {
-		fr.err = errors.Errorf("no length found in %q", fr.scratch[:6])
+		fr.err = fmt.Errorf("no length found in %q", fr.scratch[:6])
 		return false
 	}
 

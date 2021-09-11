@@ -70,7 +70,7 @@ type authenticatingWriter struct {
 	Log  func(keyvals ...interface{}) error
 }
 
-func (aw authenticatingWriter) Err() error { return aw.err }
+func (aw *authenticatingWriter) Err() error { return aw.err }
 
 func (aw *authenticatingWriter) WriteMessage(msg Message) error {
 	aw.Lock()
@@ -162,7 +162,8 @@ func (aw *authenticatingWriter) periodicStamper(period time.Duration) {
 	if aw.err = aw.stamp(&stamp, time.Now()); aw.err != nil {
 		return
 	}
-	ticks := time.Tick(period)
+	ticks := time.NewTicker(period)
+	defer ticks.Stop()
 	for aw.err == nil {
 		select {
 		case <-aw.done:
@@ -178,7 +179,7 @@ func (aw *authenticatingWriter) periodicStamper(period time.Duration) {
 			}
 			return
 
-		case t := <-ticks:
+		case t := <-ticks.C:
 			if err := aw.stamp(&stamp, t); err != nil {
 				if aw.err == nil {
 					aw.err = err

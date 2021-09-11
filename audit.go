@@ -1,4 +1,4 @@
-// Copyright 2017 Tamás Gulácsi
+// Copyright 2017, 2021 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +17,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"flag"
 	"fmt"
@@ -32,7 +33,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
@@ -58,7 +58,7 @@ func Main() error {
 	if err == nil && len(b) == ed25519.PrivateKeySize {
 		privateKey = b
 	} else {
-		log.Println(errors.Wrap(err, *flagPrivKey), fmt.Sprintf("size=%d", len(b)))
+		log.Printf("privKey=%v size=%d: %+v", *flagPrivKey, len(b), err)
 		if _, privateKey, err = ed25519.GenerateKey(rand.Reader); err != nil {
 			return err
 		}
@@ -78,7 +78,7 @@ func Main() error {
 	if flag.Arg(0) == "dump" {
 		fh, err := os.Open(flag.Arg(1))
 		if err != nil {
-			return errors.Wrap(err, flag.Arg(1))
+			return fmt.Errorf("%q: %w", flag.Arg(1), err)
 		}
 		defer fh.Close()
 		return auditlog.Dump(os.Stdout, fh, privateKey.Public().(ed25519.PublicKey), Log)
@@ -87,7 +87,7 @@ func Main() error {
 	ln, err := net.Listen("tcp", *flagAddr)
 	log.Println("Listening on " + *flagAddr)
 	if err != nil {
-		return errors.Wrap(err, *flagAddr)
+		return fmt.Errorf("%q: %w", *flagAddr, err)
 	}
 
 	aw, err := auditlog.NewAuthenticatingFileWriter(*flagLog, privateKey, *flagStampingPeriod, Log)
@@ -95,13 +95,19 @@ func Main() error {
 		return err
 	}
 	defer aw.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer close(sigCh)
 	go func() {
-		for s := range sigCh {
-			aw.Close()
-			log.Fatalf("%s received, closing down.", s)
+		sig := <-sigCh
+		cancel()
+		_ = aw.Close()
+		log.Fatalf("%s received, closing down.", sig)
+		if p, _ := os.FindProcess(os.Getpid()); p != nil {
+			time.Sleep(time.Second)
+			_ = p.Signal(sig)
 		}
 	}()
 
@@ -133,7 +139,7 @@ func Main() error {
 			lw, err = syslog.Dial(network, addr, prio, tag)
 		}
 		if err != nil {
-			return errors.Wrap(err, *flagSyslog)
+			return fmt.Errorf("%q: %w", *flagSyslog, err)
 		}
 		h.Forward = func(line []byte) error {
 			_, err := lw.Write(line)
@@ -142,15 +148,16 @@ func Main() error {
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Println(err)
 			continue
 		}
-		go h.handleConnection(conn)
+		go func() { _ = h.handleConnection(ctx, conn) }()
 	}
-
-	return aw.Close()
 }
 
 type messageWriter interface {
@@ -164,13 +171,16 @@ type handler struct {
 	Forward func([]byte) error
 }
 
-func (h handler) handleConnection(conn net.Conn) error {
+func (h handler) handleConnection(ctx context.Context, conn net.Conn) error {
 	defer conn.Close()
 
 	var msg auditlog.Message
 	source := conn.RemoteAddr().String()
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
@@ -195,7 +205,10 @@ func (h handler) handleConnection(conn net.Conn) error {
 			fmt.Fprintf(conn, "-ERROR %v\n", err)
 			continue
 		}
-		conn.Write([]byte("+OK\n"))
+		if _, err := conn.Write([]byte("+OK\n")); err != nil {
+			log.Println(err)
+			continue
+		}
 	}
 	return nil
 }
