@@ -1,4 +1,4 @@
-// Copyright 2017 Tamás Gulácsi
+// Copyright 2017, 2022 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,9 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ed25519"
-
-	"github.com/pkg/errors"
 )
 
 const DefaultStampingPeriod = 10 * time.Second
@@ -41,8 +40,8 @@ type writeSyncer interface {
 }
 type framedWriter struct {
 	hash.Hash
-	w   writeSyncer
-	Log func(keyvals ...interface{}) error
+	w writeSyncer
+	logr.Logger
 }
 
 func (w *framedWriter) Sync() error { return w.w.Sync() }
@@ -67,7 +66,7 @@ type authenticatingWriter struct {
 	sync.Mutex
 
 	Sign func([]byte) []byte
-	Log  func(keyvals ...interface{}) error
+	logr.Logger
 }
 
 func (aw *authenticatingWriter) Err() error { return aw.err }
@@ -107,46 +106,43 @@ func (aw *authenticatingWriter) Close() error {
 	return nil
 }
 
-func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, Log func(...interface{}) error) (*authenticatingWriter, error) {
+func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger logr.Logger) (*authenticatingWriter, error) {
 	fh, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
 	if err != nil {
-		return nil, errors.Wrap(err, fn)
+		return nil, fmt.Errorf("%q: %w", fn, err)
 	}
 	w := writeSyncer(fh)
 	if strings.HasSuffix(fn, ".gz") {
 		w = gzipWriteSyncer{fh: fh, gw: gzip.NewWriter(fh)}
 	}
 
-	return NewAuthenticatingWriter(w, privateKey, stampingPeriod, Log)
+	return NewAuthenticatingWriter(w, privateKey, stampingPeriod, logger)
 }
 
-func NewAuthenticatingWriter(w writeSyncer, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, Log func(...interface{}) error) (*authenticatingWriter, error) {
-	if Log == nil {
-		Log = func(...interface{}) error { return nil }
-	}
+func NewAuthenticatingWriter(w writeSyncer, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger logr.Logger) (*authenticatingWriter, error) {
 	if stampingPeriod == 0 {
 		stampingPeriod = DefaultStampingPeriod
 	}
 
 	aw := &authenticatingWriter{
-		framedWriter: &framedWriter{w: w, Hash: newHash(), Log: Log},
+		framedWriter: &framedWriter{w: w, Hash: newHash(), Logger: logger},
 		buf:          bytes.NewBuffer(make([]byte, 0, 1024)),
 		done:         make(chan struct{}),
 
 		Sign: func(message []byte) []byte {
 			return ed25519.Sign(privateKey, message)
 		},
-		Log: Log,
+		Logger: logger,
 	}
 	if _, err := aw.framedWriter.Write([]byte(Preamble)); err != nil {
-		return nil, errors.Wrap(err, "write preamble")
+		return nil, fmt.Errorf("write preamble: %w", err)
 	}
 	aw.buf.Reset()
 	if err := json.NewEncoder(aw.buf).Encode(PubKey{
 		PublicKey:      privateKey.Public().(ed25519.PublicKey),
 		StampingPeriod: stampingPeriod,
 	}); err != nil {
-		return nil, errors.Wrap(err, "marshal public key")
+		return nil, fmt.Errorf("marshal public key: %w", err)
 	}
 	_, err := aw.framedWriter.Write(aw.buf.Bytes())
 	if err != nil {
@@ -217,7 +213,7 @@ func (aw *authenticatingWriter) stamp(s *Stamp, t time.Time) error {
 	s.Signature = aw.Sign(s.Hash)
 	aw.buf.Reset()
 	if err := json.NewEncoder(aw.buf).Encode(WrappedStamp{Stamp: *s}); err != nil {
-		return errors.Wrapf(err, "%#v", *s)
+		return fmt.Errorf("encode %#v: %w", *s, err)
 	}
 	if _, err := aw.framedWriter.Write(aw.buf.Bytes()); err != nil {
 		return err

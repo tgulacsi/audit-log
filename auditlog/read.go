@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -43,11 +44,7 @@ var (
 	ErrMissingTime    = errors.New("missing time")
 )
 
-func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...interface{}) error) error {
-	if Log == nil {
-		Log = func(...interface{}) error { return nil }
-	}
-
+func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, logger logr.Logger) error {
 	// try to decompress
 	var buf bytes.Buffer
 	gr, err := gzip.NewReader(io.TeeReader(r, &buf))
@@ -58,7 +55,7 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 		defer gr.Close()
 	}
 
-	fr := &framedReader{br: bufio.NewReader(r), Hash: newHash(), Log: Log}
+	fr := &framedReader{br: bufio.NewReader(r), Hash: newHash(), Logger: logger}
 	if !fr.Next() {
 		if err = fr.Err(); err == nil {
 			err = io.EOF
@@ -84,7 +81,7 @@ func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, Log func(...int
 			}
 			return ErrSigMismatch
 		},
-		Log: Log,
+		Logger: logger,
 	}
 	for fr.Next() {
 		var msg Message
@@ -111,7 +108,7 @@ type authenticatedReader struct {
 	lastStampTime  time.Time
 	scratch        []byte
 	Verify         func(message, sig []byte) error
-	Log            func(keyvals ...interface{}) error
+	logr.Logger
 }
 
 // Verify the data hash and signature, and return whether this should be processed (realm message).
@@ -165,7 +162,7 @@ type framedReader struct {
 	br   *bufio.Reader
 	Hash hash.Hash
 	err  error
-	Log  func(...interface{}) error
+	logr.Logger
 
 	prevHash []byte
 	NextHash hash.Hash

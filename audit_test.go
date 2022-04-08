@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/testr"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
@@ -39,11 +40,8 @@ func TestAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Log := func(keyvals ...interface{}) error {
-		t.Log(keyvals...)
-		return nil
-	}
-	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, Log)
+	logger := testr.New(t)
+	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +55,7 @@ func TestAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fh.Close()
-	if err := auditlog.Dump(os.Stdout, fh, publicKey, Log); err != nil {
+	if err := auditlog.Dump(os.Stdout, fh, publicKey, logger); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -33,6 +33,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zerologr"
+	"github.com/rs/zerolog"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
@@ -67,12 +70,10 @@ func Main() error {
 		}
 	}
 
-	var Log func(...interface{}) error
+	logger := logr.Discard()
 	if *flagVerbose {
-		Log = func(keyvals ...interface{}) error {
-			log.Println(keyvals...)
-			return nil
-		}
+		zl := zerolog.New(os.Stderr).With().Timestamp().Logger().Level(zerolog.InfoLevel)
+		logger = zerologr.New(&zl)
 	}
 
 	if flag.Arg(0) == "dump" {
@@ -81,7 +82,7 @@ func Main() error {
 			return fmt.Errorf("%q: %w", flag.Arg(1), err)
 		}
 		defer fh.Close()
-		return auditlog.Dump(os.Stdout, fh, privateKey.Public().(ed25519.PublicKey), Log)
+		return auditlog.Dump(os.Stdout, fh, privateKey.Public().(ed25519.PublicKey), logger)
 	}
 
 	ln, err := net.Listen("tcp", *flagAddr)
@@ -90,7 +91,7 @@ func Main() error {
 		return fmt.Errorf("%q: %w", *flagAddr, err)
 	}
 
-	aw, err := auditlog.NewAuthenticatingFileWriter(*flagLog, privateKey, *flagStampingPeriod, Log)
+	aw, err := auditlog.NewAuthenticatingFileWriter(*flagLog, privateKey, *flagStampingPeriod, logger)
 	if err != nil {
 		return err
 	}
