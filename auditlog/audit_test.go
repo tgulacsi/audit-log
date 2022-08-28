@@ -1,4 +1,4 @@
-// Copyright 2017, 2020 Tamás Gulácsi
+// Copyright 2017, 2022 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/testr"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
@@ -39,10 +40,7 @@ func TestAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Log := func(keyvals ...interface{}) error {
-		t.Log(keyvals...)
-		return nil
-	}
+	Log := testr.New(t)
 	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, Log)
 	if err != nil {
 		t.Fatal(err)

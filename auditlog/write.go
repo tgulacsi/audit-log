@@ -107,7 +107,7 @@ func (aw *authenticatingWriter) Close() error {
 }
 
 func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger logr.Logger) (*authenticatingWriter, error) {
-	fh, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
+	fh, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w", fn, err)
 	}
