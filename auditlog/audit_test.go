@@ -1,4 +1,4 @@
-// Copyright 2017, 2022 Tamás Gulácsi
+// Copyright 2017, 2023 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,18 +17,17 @@ package auditlog_test
 
 import (
 	"crypto/rand"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr/testr"
+	"github.com/UNO-SOFT/zlog/v2"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
 
 func TestAudit(t *testing.T) {
-	fh, err := ioutil.TempFile("", "audit-")
+	fh, err := os.CreateTemp("", "audit-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +39,7 @@ func TestAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Log := testr.New(t)
+	Log := zlog.NewT(t).SLog()
 	aw, err := auditlog.NewAuthenticatingWriter(fh, privateKey, 100*time.Millisecond, Log)
 	if err != nil {
 		t.Fatal(err)

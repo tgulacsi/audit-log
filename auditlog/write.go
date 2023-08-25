@@ -1,4 +1,4 @@
-// Copyright 2017, 2022 Tamás Gulácsi
+// Copyright 2017, 2023 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,12 +23,12 @@ import (
 	"hash"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -41,7 +41,7 @@ type writeSyncer interface {
 type framedWriter struct {
 	hash.Hash
 	w writeSyncer
-	logr.Logger
+	*slog.Logger
 }
 
 func (w *framedWriter) Sync() error { return w.w.Sync() }
@@ -66,7 +66,7 @@ type authenticatingWriter struct {
 	sync.Mutex
 
 	Sign func([]byte) []byte
-	logr.Logger
+	*slog.Logger
 }
 
 func (aw *authenticatingWriter) Err() error { return aw.err }
@@ -106,7 +106,7 @@ func (aw *authenticatingWriter) Close() error {
 	return nil
 }
 
-func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger logr.Logger) (*authenticatingWriter, error) {
+func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger *slog.Logger) (*authenticatingWriter, error) {
 	fh, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("%q: %w", fn, err)
@@ -119,7 +119,7 @@ func NewAuthenticatingFileWriter(fn string, privateKey ed25519.PrivateKey, stamp
 	return NewAuthenticatingWriter(w, privateKey, stampingPeriod, logger)
 }
 
-func NewAuthenticatingWriter(w writeSyncer, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger logr.Logger) (*authenticatingWriter, error) {
+func NewAuthenticatingWriter(w writeSyncer, privateKey ed25519.PrivateKey, stampingPeriod time.Duration, logger *slog.Logger) (*authenticatingWriter, error) {
 	if stampingPeriod == 0 {
 		stampingPeriod = DefaultStampingPeriod
 	}

@@ -1,4 +1,4 @@
-// Copyright 2017 Tamás Gulácsi
+// Copyright 2017, 2023 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,10 +26,10 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log/slog"
 	"strconv"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -44,7 +44,7 @@ var (
 	ErrMissingTime    = errors.New("missing time")
 )
 
-func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, logger logr.Logger) error {
+func Dump(w io.Writer, r io.Reader, publicKey ed25519.PublicKey, logger *slog.Logger) error {
 	// try to decompress
 	var buf bytes.Buffer
 	gr, err := gzip.NewReader(io.TeeReader(r, &buf))
@@ -108,7 +108,7 @@ type authenticatedReader struct {
 	lastStampTime  time.Time
 	scratch        []byte
 	Verify         func(message, sig []byte) error
-	logr.Logger
+	*slog.Logger
 }
 
 // Verify the data hash and signature, and return whether this should be processed (realm message).
@@ -162,7 +162,7 @@ type framedReader struct {
 	br   *bufio.Reader
 	Hash hash.Hash
 	err  error
-	logr.Logger
+	*slog.Logger
 
 	prevHash []byte
 	NextHash hash.Hash

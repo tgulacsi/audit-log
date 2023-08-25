@@ -1,4 +1,4 @@
-// Copyright 2017, 2021 Tamás Gulácsi
+// Copyright 2017, 2023 Tamás Gulácsi
 //
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,8 +22,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
+	"log/slog"
 	"log/syslog"
 	"net"
 	"net/url"
@@ -33,9 +33,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-logr/logr"
-	"github.com/go-logr/zerologr"
-	"github.com/rs/zerolog"
+	"github.com/google/renameio/v2"
 	"github.com/tgulacsi/audit-log/auditlog"
 	"golang.org/x/crypto/ed25519"
 )
@@ -57,7 +55,7 @@ func Main() error {
 	flag.Parse()
 
 	var privateKey ed25519.PrivateKey
-	b, err := ioutil.ReadFile(*flagPrivKey)
+	b, err := os.ReadFile(*flagPrivKey)
 	if err == nil && len(b) == ed25519.PrivateKeySize {
 		privateKey = b
 	} else {
@@ -65,15 +63,16 @@ func Main() error {
 		if _, privateKey, err = ed25519.GenerateKey(rand.Reader); err != nil {
 			return err
 		}
-		if err := ioutil.WriteFile(*flagPrivKey, privateKey, 0400); err != nil {
+		if err := renameio.WriteFile(*flagPrivKey, privateKey, 0400); err != nil {
 			return err
 		}
 	}
 
-	logger := logr.Discard()
+	logger := slog.Default()
 	if *flagVerbose {
-		zl := zerolog.New(os.Stderr).With().Timestamp().Logger().Level(zerolog.InfoLevel)
-		logger = zerologr.New(&zl)
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
 	}
 
 	if flag.Arg(0) == "dump" {
